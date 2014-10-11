@@ -23,14 +23,19 @@ import org.jnetpcap.packet.PcapPacket;//パケットクラス
 import org.jnetpcap.packet.PcapPacketHandler;//パケットハンドラクラス
 import org.jnetpcap.protocol.tcpip.Udp;
 
-public class HeavenMain implements Runnable {
-	private static final String PROPERTIES = "properties.xml";
-	private static final String STARTUP_MESSAGE = "Heaven Standby";
-	private static final int INFINITE = 0;
-	private static final String PACKET_MODELDATA = "3D";
-	private static final String PACKET_LIVE = "80";
-	private static final String PACKET_BULLET = "15";
-	private static final int BULLET_SIZE = 52;
+/**
+ * RigidChips用パケットキャプチャ+解析+RCとの通信ツール オンラインの他プレイヤーが撃ったARM弾の情報をRCに送信します
+ *
+ */
+public class HeavenMain {
+	private static final String PROPERTIES = "properties.xml";// プロパティファイルのパス
+	private static final String STARTUP_MESSAGE = "Heaven Standby";// 起動時に表示されるメッセージ
+	private static final int INFINITE = 0;// パケットキャプチャの回数
+	private static final String PACKET_MODELDATA = "3D";// モデル情報送信パケットの識別子？[16進]
+	private static final String PACKET_LIVE = "80";// 生存情報送信パケットの識別子？[16進]
+	private static final String PACKET_BULLET = "15";// ARM弾の識別子？[16進]
+	private static final int BULLET_SIZE = 52; // ARM弾1発分のデータのサイズ[バイト]
+
 	private Properties prop = new Properties();
 	private String outputPath = "";
 	private String address = "";
@@ -38,10 +43,10 @@ public class HeavenMain implements Runnable {
 	private boolean debug = false;
 	private String debugOutputPath = "";
 
-	private StringBuilder writeSpooler = new StringBuilder();// ファイルに書き込む文字列
-	private StringBuilder debugWriteSpooler = new StringBuilder();// デバッグ用ファイルに書き込む文字列
+	private StringBuilder writeSpooler = new StringBuilder();// ファイルに書き込む文字列の準備場所
+	private StringBuilder debugWriteSpooler = new StringBuilder();// デバッグ用ファイルに書き込む文字列の準備場所
 
-	private Thread thread;
+	private Thread thread;// スレッドを使ってファイルに書き込みたかった
 
 	private File file = null;
 	private BufferedWriter bw = null;
@@ -109,26 +114,32 @@ public class HeavenMain implements Runnable {
 			int timeout = 3 * 1000; // 1 seconds in millis
 			Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags,
 					timeout, errbuf);
+
+			// 準備中にエラーが発生したら終了
 			if (pcap == null) {
 				System.err.printf(
 						"Error while opening device for capture: %s\n",
 						errbuf.toString());
 				return;
 			}
-			// フィルタ設定
+
+			// キャプチャフィルタ設定
 			PcapBpfProgram program = new PcapBpfProgram();
-			String expression = "ip and udp and host " + address + " and port "
-					+ port;
-			// String expression = "ip and udp and dst host " + address +
-			// " and dst port " + port;
+			// String expression = "ip and udp and host " + address +
+			// " and port "
+			// + port;
+			String expression = "ip and udp and dst host " + address
+					+ " and dst port " + port;
 			int optimize = 1; // 0 = false
 			int netmask = 0xFFFFFF00; // 255.255.255.0
 
+			// キャプチャフィルタをコンパイル
 			if (pcap.compile(program, expression, optimize, netmask) != Pcap.OK) {
 				System.err.println(pcap.getErr());
 				return;
 			}
 
+			// キャプチャフィルタを適用
 			if (pcap.setFilter(program) != Pcap.OK) {
 				System.err.println(pcap.getErr());
 				return;
@@ -140,9 +151,9 @@ public class HeavenMain implements Runnable {
 				// パケットをキャプチャし続ける
 				// 紆余曲折あってこうなった
 				// いつか直す
-				// pcap.loop(INFINITE, BulletHandler, "");
+				// pcap.loop(INFINITE, BulletHandler, "");//定期的にまとめてパケットが送られてくる
 				while (true) {
-					pcap.loop(1, BulletHandler, "");
+					pcap.loop(1, BulletHandler, "");// リアルタイムにパケットが送られてきて欲しい
 				}
 			} finally {
 				pcap.close();
@@ -153,6 +164,11 @@ public class HeavenMain implements Runnable {
 		}
 	}
 
+	/**
+	 * プロパティを読み込むクラス
+	 * 
+	 * @throws IOException
+	 */
 	public void loadProperty() throws IOException {
 		InputStream is = new FileInputStream(PROPERTIES);
 		prop.loadFromXML(is);
@@ -164,7 +180,9 @@ public class HeavenMain implements Runnable {
 		debugOutputPath = prop.getProperty("debugOutputPath");
 	}
 
-	// キャプチャーしたパケットを解析する内部クラス
+	/**
+	 * キャプチャーしたパケットを解析する内部クラス
+	 */
 	public class HeavenPacketHandler implements PcapPacketHandler<String> {
 
 		private Udp udp = new Udp();
@@ -172,9 +190,9 @@ public class HeavenMain implements Runnable {
 		private ByteBuffer bb = null;
 		private long start, stop; // 処理速度測定用
 
-		public HeavenPacketHandler() {
-			super();
-		}
+		// public HeavenPacketHandler() {
+		// super();
+		// }
 
 		@Override
 		public void nextPacket(PcapPacket packet, String user) {
@@ -234,7 +252,7 @@ public class HeavenMain implements Runnable {
 					str.append("vy=" + bb.getFloat() + ",");
 					str.append("vz=" + bb.getFloat() + ",");
 					str.append("option=" + bb.getFloat());
-					bb.getFloat();// 用途不明 読み出しはするけど利用はしない
+					bb.getFloat(); // 用途不明 読み出しはするけど利用はしない
 					bb.getFloat();
 					bb.getFloat();
 					bb.getFloat();
@@ -275,7 +293,7 @@ public class HeavenMain implements Runnable {
 					file = new File(outputPath);
 					bw = new BufferedWriter(new FileWriter(file, true));
 					bw.write(s);
-					System.out.println(s);
+					// System.out.println(s);
 					bw.newLine();
 					bw.close();
 				} else {
@@ -310,51 +328,4 @@ public class HeavenMain implements Runnable {
 		return bytesToHex(bytes);
 	}
 
-	// スプーラーからファイル書き込み
-	public void outPutFile() {
-		try {
-			if (!(writeSpooler.length() <= 1)) {
-				file = new File(outputPath);
-				bw = new BufferedWriter(new FileWriter(file, true));
-				bw.write(writeSpooler.toString());
-				System.out.println(writeSpooler.toString());
-				bw.newLine();
-				bw.close();
-				writeSpooler.delete(0, writeSpooler.length());
-			}
-			if (debug) {
-				if (!(debugWriteSpooler.length() <= 1)) {
-					file = new File(debugOutputPath);
-					bw = new BufferedWriter(new FileWriter(file, true));
-					bw.write(debugWriteSpooler.toString());
-					bw.newLine();
-					bw.close();
-					writeSpooler.delete(0, debugWriteSpooler.length());
-				}
-			}
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-	}
-
-	private long start, stop;
-
-	@Override
-	public void run() {
-		// TODO Auto-generated method stub
-		while (true) {
-			try {
-				// 定期的にファイルに書き込む
-				// start = System.currentTimeMillis();
-				outPutFile();
-				// stop = System.currentTimeMillis();
-				// System.out.println(stop - start);
-				Thread.sleep(1000 / 30);
-			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-	}
 }
