@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+<comment>Heavenプロパティファイル</comment>
+
+<entry key="outputPath">R:\Workspace\heaven.txt</entry>
+<entry key="IPAddress">127.0.0.1</entry>
+<entry key="port">1234</entry>
+<entry key="debug">false</entry>
+<entry key="debugOutputPath">R:\Workspace\heaven_debug.txt</entry>
+
+</properties>
