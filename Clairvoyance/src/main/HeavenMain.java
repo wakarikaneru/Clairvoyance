@@ -18,7 +18,11 @@ import java.util.Properties;
 
 import org.jnetpcap.Pcap;
 import org.jnetpcap.PcapBpfProgram;
+import org.jnetpcap.PcapHeader;
 import org.jnetpcap.PcapIf;
+import org.jnetpcap.nio.JBuffer;
+import org.jnetpcap.nio.JMemory;
+import org.jnetpcap.packet.JRegistry;
 import org.jnetpcap.packet.PcapPacket;//パケットクラス
 import org.jnetpcap.packet.PcapPacketHandler;//パケットハンドラクラス
 import org.jnetpcap.protocol.tcpip.Udp;
@@ -30,7 +34,7 @@ import org.jnetpcap.protocol.tcpip.Udp;
 public class HeavenMain {
 	private static final String PROPERTIES = "properties.xml";// プロパティファイルのパス
 	private static final String STARTUP_MESSAGE = "Heaven Standby";// 起動時に表示されるメッセージ
-	private static final int INFINITE = 0;// パケットキャプチャの回数
+
 	private static final String PACKET_MODELDATA = "3D";// モデル情報送信パケットの識別子？[16進]
 	private static final String PACKET_LIVE = "80";// 生存情報送信パケットの識別子？[16進]
 	private static final String PACKET_BULLET = "15";// ARM弾の識別子？[16進]
@@ -43,13 +47,20 @@ public class HeavenMain {
 	private boolean debug = false;
 	private String debugOutputPath = "";
 
-	private StringBuilder writeSpooler = new StringBuilder();// ファイルに書き込む文字列の準備場所
-	private StringBuilder debugWriteSpooler = new StringBuilder();// デバッグ用ファイルに書き込む文字列の準備場所
-
-	private Thread thread;// スレッドを使ってファイルに書き込みたかった
-
 	private File file = null;
 	private BufferedWriter bw = null;
+
+	private PcapHeader hdr = null;
+	private JBuffer buf = null;
+
+	private int id = 0;
+
+	private Udp udp = new Udp();
+	private PcapPacket packet = null;
+
+	private byte[] b = null;
+	private ByteBuffer bb = null;
+	private long start, stop; // 処理速度測定用
 
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -58,118 +69,149 @@ public class HeavenMain {
 
 	public HeavenMain() {
 		System.out.println(STARTUP_MESSAGE);
+		// プロパティ読み込み
+		System.out.println("Loading Property:");
 		try {
-			// プロパティ読み込み
-			System.out.println("Loading Property:");
 			loadProperty();
-			// プロパティ表示
-			System.out.println("\tOutput Path\t" + outputPath);
-			System.out.println("\tIP Address\t" + address);
-			System.out.println("\tPort\t" + port);
-			System.out.println("\tDebug\t" + debug);
-			System.out.println("\tDebug Output Path\t" + debugOutputPath);
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		// プロパティ表示
+		System.out.println("\tOutput Path\t" + outputPath);
+		System.out.println("\tIP Address\t" + address);
+		System.out.println("\tPort\t" + port);
+		System.out.println("\tDebug\t" + debug);
+		System.out.println("\tDebug Output Path\t" + debugOutputPath);
 
-			// ファイル書き込み用スレッド
-			// thread = new Thread(this);
-			// thread.start();
+		// ネットワークインターフェースを検索
+		List<PcapIf> alldevs = new ArrayList<PcapIf>(); // NIC一覧
+		StringBuilder errbuf = new StringBuilder(); // エラーメッセージ格納用
 
-			// ネットワークインターフェースを検索
-			List<PcapIf> alldevs = new ArrayList<PcapIf>(); // NIC一覧
-			StringBuilder errbuf = new StringBuilder(); // エラーメッセージ格納用
+		int r = Pcap.findAllDevs(alldevs, errbuf);
 
-			int r = Pcap.findAllDevs(alldevs, errbuf);
+		// ネットワークインターフェースが見つからない場合エラー
+		if (r != Pcap.OK || alldevs.isEmpty()) {
+			System.err.printf("Can't read list of devices, error is %s\n",
+					errbuf.toString());
+			return;
+		}
 
-			// ネットワークインターフェースが見つからない場合エラー
-			if (r != Pcap.OK || alldevs.isEmpty()) {
-				System.err.printf("Can't read list of devices, error is %s\n",
-						errbuf.toString());
-				return;
-			}
+		// ネットワークインターフェースを一覧表示
+		System.out.println("Network devices found:");
+		int i = 0;
+		for (PcapIf device : alldevs) {
+			String description = (device.getDescription() != null) ? device
+					.getDescription() : "No description available";
+			System.out.printf("\t#%d: %s [%s]\n", i++, device.getName(),
+					description);
+		}
 
-			// ネットワークインターフェースを一覧表示
-			System.out.println("Network devices found:");
-			int i = 0;
-			for (PcapIf device : alldevs) {
-				String description = (device.getDescription() != null) ? device
-						.getDescription() : "No description available";
-				System.out.printf("\t#%d: %s [%s]\n", i++, device.getName(),
-						description);
-			}
+		// インターフェースを選択する
+		System.out.println("Select Network devices:");
+		System.out.println("\tChoose Network devices Number\t");
 
-			// インターフェースを選択する
-			System.out.println("Select Network devices:");
-			System.out.println("\tChoose Network devices Number\t");
+		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+		PcapIf device = null;
 
-			BufferedReader br = new BufferedReader(new InputStreamReader(
-					System.in));
-			PcapIf device = alldevs.get(Integer.parseInt(br.readLine()));
-			System.out.printf("\nChoosing '%s' on your behalf:\n", (device
-					.getDescription() != null) ? device.getDescription()
-					: device.getName());
-
-			// キャプチャ準備
-			int snaplen = 64 * 1024; // Capture all packets, no trucation
-			// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
-			int flags = Pcap.MODE_NON_PROMISCUOUS;
-			int timeout = 3 * 1000; // 1 seconds in millis
-			Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags,
-					timeout, errbuf);
-
-			// 準備中にエラーが発生したら終了
-			if (pcap == null) {
-				System.err.printf(
-						"Error while opening device for capture: %s\n",
-						errbuf.toString());
-				return;
-			}
-
-			// キャプチャフィルタ設定
-			PcapBpfProgram program = new PcapBpfProgram();
-			// String expression = "ip and udp and host " + address +
-			// " and port "
-			// + port;
-			String expression = "ip and udp and dst host " + address
-					+ " and dst port " + port;
-			int optimize = 1; // 0 = false
-			int netmask = 0xFFFFFF00; // 255.255.255.0
-
-			// キャプチャフィルタをコンパイル
-			if (pcap.compile(program, expression, optimize, netmask) != Pcap.OK) {
-				System.err.println(pcap.getErr());
-				return;
-			}
-
-			// キャプチャフィルタを適用
-			if (pcap.setFilter(program) != Pcap.OK) {
-				System.err.println(pcap.getErr());
-				return;
-			}
-			// キャプチャ開始
-			HeavenPacketHandler BulletHandler = new HeavenPacketHandler();
-
-			try {
-				// パケットをキャプチャし続ける
-				// 紆余曲折あってこうなった
-				// いつか直す
-				// pcap.loop(INFINITE, BulletHandler, "");//定期的にまとめてパケットが送られてくる
-				while (true) {
-					pcap.loop(1, BulletHandler, "");// リアルタイムにパケットが送られてきて欲しい
-				}
-			} finally {
-				pcap.close();
-			}
-
-		} catch (Exception e) {
+		try {
+			device = alldevs.get(Integer.parseInt(br.readLine()));
+		} catch (NumberFormatException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+
+		if (device == null) {
+			device = alldevs.get(0);
+		}
+
+		System.out.printf("\nChoosing '%s' on your behalf:\n",
+				(device.getDescription() != null) ? device.getDescription()
+						: device.getName());
+
+		// キャプチャ準備
+		int snaplen = 64 * 1024; // Capture all packets, no trucation
+		// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
+		int flags = Pcap.MODE_NON_PROMISCUOUS;
+		int timeout = 3 * 1000; // 1 seconds in millis
+		Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags, timeout,
+				errbuf);
+
+		// 準備中にエラーが発生したら終了
+		if (pcap == null) {
+			System.err.printf("Error while opening device for capture: %s\n",
+					errbuf.toString());
+			return;
+		}
+
+		// キャプチャフィルタ設定
+		PcapBpfProgram program = new PcapBpfProgram();
+		// String expression = "ip and udp and host " + address + " and port "
+		// + port;
+		String expression = "ip and udp and dst host " + address
+				+ " and dst port " + port;
+		int optimize = 1; // 0 = false
+		int netmask = 0xFFFFFF00; // 255.255.255.0
+
+		// キャプチャフィルタをコンパイル
+		if (pcap.compile(program, expression, optimize, netmask) != Pcap.OK) {
+			System.err.println(pcap.getErr());
+			return;
+		}
+
+		// キャプチャフィルタを適用
+		if (pcap.setFilter(program) != Pcap.OK) {
+			System.err.println(pcap.getErr());
+			return;
+		}
+
+		// キャプチャ開始
+		hdr = new PcapHeader(JMemory.POINTER);
+		buf = new JBuffer(JMemory.POINTER);
+		id = JRegistry.mapDLTToId(pcap.datalink());
+
+		// パケットをキャプチャし続ける
+		while (pcap.nextEx(hdr, buf) == Pcap.NEXT_EX_OK) {
+			// パケットのキャプチャに成功したら
+			packet = new PcapPacket(hdr, buf);
+			packet.scan(id);
+
+			// パケットはUDPか
+			if (packet.hasHeader(udp)) {
+				// パケットをUDPとして解析
+				packet.scan(Udp.ID);
+				// パケットのデータ部分を抽出
+				b = udp.getPayload();
+
+				// モデルデータの通信か判別する
+				if (PACKET_MODELDATA.equals(bytesToHex(b[0]))) {
+					// ARM弾の射撃情報か判別する
+					if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
+						// データの解析
+						decodeData(b);
+						System.out.println(((b.length - 6) / 52)
+								+ " Bullet(s) Detected");
+					}
+				}
+				// デバッグモード
+				if (debug) {
+					outputHex(b);
+				}
+
+			}
+		}
+		pcap.close();
 	}
 
 	/**
-	 * プロパティを読み込むクラス
+	 * プロパティを読み込むメソッド
 	 * 
 	 * @throws IOException
 	 */
-	public void loadProperty() throws IOException {
+	private void loadProperty() throws IOException {
 		InputStream is = new FileInputStream(PROPERTIES);
 		prop.loadFromXML(is);
 
@@ -180,133 +222,72 @@ public class HeavenMain {
 		debugOutputPath = prop.getProperty("debugOutputPath");
 	}
 
-	/**
-	 * キャプチャーしたパケットを解析する内部クラス
-	 */
-	public class HeavenPacketHandler implements PcapPacketHandler<String> {
-
-		private Udp udp = new Udp();
-		private byte[] b = null;
-		private ByteBuffer bb = null;
-		private long start, stop; // 処理速度測定用
-
-		// public HeavenPacketHandler() {
-		// super();
-		// }
-
-		@Override
-		public void nextPacket(PcapPacket packet, String user) {
-			try {
-				// start = System.currentTimeMillis();
-
-				// TODO Auto-generated method stub
-				// パケットはUDPか
-				if (packet.hasHeader(udp)) {
-					// パケットをUDPとして解析
-					packet.scan(Udp.ID);
-					// パケットのデータ部分を抽出
-					b = udp.getPayload();
-					// モデルデータの通信か判別する
-					if (PACKET_MODELDATA.equals(bytesToHex(b[0]))) {
-						// ARM弾の射撃情報か判別する
-						if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
-							// データの解析
-							decodeData(b);
-							System.out.println(((b.length - 6) / 52)
-									+ " Bullet(s) Detected");
-						}
-					}
-					// デバッグモード
-					if (debug) {
-						// stop = System.currentTimeMillis();
-						// writeFile(debugOutputPath, String.valueOf(start));
-						// writeFile(debugOutputPath, String.valueOf(stop -
-						// start));
-						outputHex(b);
-					}
-				}
-			} catch (Exception e) {
-				e.printStackTrace();
+	// 抽出したデータ部を解析して出力する
+	private void decodeData(byte[] b) {
+		bb = ByteBuffer.wrap(b);
+		bb.order(ByteOrder.LITTLE_ENDIAN);
+		// データを読み込む準備
+		try {
+			// ヘッダ部分を読み飛ばす
+			bb.getShort();
+			bb.get();
+			bb.get();
+			bb.getShort();
+			StringBuilder str = new StringBuilder();
+			for (int i = 0; i < (b.length - 6) / BULLET_SIZE; i++) {
+				str.append("{");
+				// データを抽出
+				str.append("x=" + bb.getFloat() + ",");
+				str.append("y=" + bb.getFloat() + ",");
+				str.append("z=" + bb.getFloat() + ",");
+				str.append("vx=" + bb.getFloat() + ",");
+				str.append("vy=" + bb.getFloat() + ",");
+				str.append("vz=" + bb.getFloat() + ",");
+				str.append("option=" + bb.getFloat());
+				bb.getFloat(); // 用途不明 読み出しはするけど利用はしない
+				bb.getFloat();
+				bb.getFloat();
+				bb.getFloat();
+				bb.getFloat();
+				bb.getFloat();
+				str.append("};");
 			}
+			// writeSpooler(str.toString(), false);
+			writeFile(str.toString(), false);
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		}
+	}
 
-		// 抽出したデータ部を解析して出力する
-		public void decodeData(byte[] b) {
-			bb = ByteBuffer.wrap(b);
-			bb.order(ByteOrder.LITTLE_ENDIAN);
-			// データを読み込む準備
-			try {
-				// ヘッダ部分を読み飛ばす
-				bb.getShort();
-				bb.get();
-				bb.get();
-				bb.getShort();
-				StringBuilder str = new StringBuilder();
-				for (int i = 0; i < (b.length - 6) / BULLET_SIZE; i++) {
-					str.append("{");
-					// データを抽出
-					str.append("x=" + bb.getFloat() + ",");
-					str.append("y=" + bb.getFloat() + ",");
-					str.append("z=" + bb.getFloat() + ",");
-					str.append("vx=" + bb.getFloat() + ",");
-					str.append("vy=" + bb.getFloat() + ",");
-					str.append("vz=" + bb.getFloat() + ",");
-					str.append("option=" + bb.getFloat());
-					bb.getFloat(); // 用途不明 読み出しはするけど利用はしない
-					bb.getFloat();
-					bb.getFloat();
-					bb.getFloat();
-					bb.getFloat();
-					bb.getFloat();
-					str.append("};");
-				}
-				// writeSpooler(str.toString(), false);
-				writeDirect(str.toString(), false);
-			} catch (Exception e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
+	// デバッグ用
+	// HEXを出力する
+	public void outputHex(byte[] b) {
+		// writeSpooler(bytesToHex(b), true);
+		writeFile(bytesToHex(b), true);
+	}
 
-		// デバッグ用
-		// HEXを出力する
-		public void outputHex(byte[] b) {
-			// writeSpooler(bytesToHex(b), true);
-			writeDirect(bytesToHex(b), true);
-		}
-
-		// ファイル書き込み用スプーラーに書き込み
-		public void writeSpooler(String s, boolean isDebug) {
-			// HEX表示
-			if (isDebug) {
-				debugWriteSpooler.append(s);
+	// 直接ファイルに書き込み
+	private void writeFile(String s, boolean isDebug) {
+		// HEX表示
+		try {
+			if (!isDebug) {
+				file = new File(outputPath);
+				bw = new BufferedWriter(new FileWriter(file, true));
+				bw.write(s);
+				// System.out.println(s);
+				bw.newLine();
+				bw.close();
 			} else {
-				writeSpooler.append(s);
+				file = new File(debugOutputPath);
+				bw = new BufferedWriter(new FileWriter(file, true));
+				bw.write(s);
+				bw.newLine();
+				bw.close();
 			}
-		}
-
-		// スプーラーを介さず直接ファイルに書き込み
-		public void writeDirect(String s, boolean isDebug) {
-			// HEX表示
-			try {
-				if (!isDebug) {
-					file = new File(outputPath);
-					bw = new BufferedWriter(new FileWriter(file, true));
-					bw.write(s);
-					// System.out.println(s);
-					bw.newLine();
-					bw.close();
-				} else {
-					file = new File(debugOutputPath);
-					bw = new BufferedWriter(new FileWriter(file, true));
-					bw.write(s);
-					bw.newLine();
-					bw.close();
-				}
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		}
 	}
 
