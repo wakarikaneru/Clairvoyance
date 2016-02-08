@@ -63,7 +63,6 @@ public class HeavenMain {
 	private long start, stop; // 処理速度測定用
 
 	public static void main(String[] args) {
-		// TODO Auto-generated method stub
 		HeavenMain main = new HeavenMain();
 	}
 
@@ -74,7 +73,6 @@ public class HeavenMain {
 		try {
 			loadProperty();
 		} catch (IOException e1) {
-			// TODO Auto-generated catch block
 			e1.printStackTrace();
 		}
 		// プロパティ表示
@@ -117,10 +115,8 @@ public class HeavenMain {
 		try {
 			device = alldevs.get(Integer.parseInt(br.readLine()));
 		} catch (NumberFormatException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 
@@ -136,7 +132,7 @@ public class HeavenMain {
 		int snaplen = 64 * 1024; // Capture all packets, no trucation
 		// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
 		int flags = Pcap.MODE_NON_PROMISCUOUS;
-		int timeout = 3 * 1000; // 1 seconds in millis
+		int timeout = 30; // millis
 		Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags, timeout,
 				errbuf);
 
@@ -174,36 +170,41 @@ public class HeavenMain {
 		id = JRegistry.mapDLTToId(pcap.datalink());
 
 		// パケットをキャプチャし続ける
-		while (pcap.nextEx(hdr, buf) == Pcap.NEXT_EX_OK) {
-			// パケットのキャプチャに成功したら
-			packet = new PcapPacket(hdr, buf);
-			packet.scan(id);
+		try {
+			while (true) {
+				while (pcap.nextEx(hdr, buf) == Pcap.NEXT_EX_OK) {
+					// パケットのキャプチャに成功したら
+					packet = new PcapPacket(hdr, buf);
+					packet.scan(id);
 
-			// パケットはUDPか
-			if (packet.hasHeader(udp)) {
-				// パケットをUDPとして解析
-				packet.scan(Udp.ID);
-				// パケットのデータ部分を抽出
-				b = udp.getPayload();
+					// パケットはUDPか
+					if (packet.hasHeader(udp)) {
+						// パケットをUDPとして解析
+						packet.scan(Udp.ID);
+						// パケットのデータ部分を抽出
+						b = udp.getPayload();
 
-				// モデルデータの通信か判別する
-				if (PACKET_MODELDATA.equals(bytesToHex(b[0]))) {
-					// ARM弾の射撃情報か判別する
-					if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
-						// データの解析
-						decodeData(b);
-						System.out.println(((b.length - 6) / 52)
-								+ " Bullet(s) Detected");
+						// モデルデータの通信か判別する
+						if (PACKET_MODELDATA.equals(bytesToHex(b[0]))) {
+							// ARM弾の射撃情報か判別する
+							if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
+								// データの解析
+								decodeData(b);
+								System.out.println(((b.length - 6) / 52)
+										+ " Bullet(s) Detected");
+							}
+						}
+						// デバッグモード
+						if (debug) {
+							outputHex(b);
+						}
+
 					}
 				}
-				// デバッグモード
-				if (debug) {
-					outputHex(b);
-				}
-
 			}
+		} finally {
+			pcap.close();
 		}
-		pcap.close();
 	}
 
 	/**
@@ -255,7 +256,6 @@ public class HeavenMain {
 			// writeSpooler(str.toString(), false);
 			writeFile(str.toString(), false);
 		} catch (Exception e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
@@ -286,7 +286,6 @@ public class HeavenMain {
 				bw.close();
 			}
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
