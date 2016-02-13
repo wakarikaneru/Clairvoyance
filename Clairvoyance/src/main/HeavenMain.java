@@ -64,9 +64,13 @@ public class HeavenMain {
 
 	public static void main(String[] args) {
 		HeavenMain main = new HeavenMain();
+		main.capture();
 	}
 
 	public HeavenMain() {
+	}
+
+	public void capture() {
 		System.out.println(STARTUP_MESSAGE);
 		// プロパティ読み込み
 		System.out.println("Loading Property:");
