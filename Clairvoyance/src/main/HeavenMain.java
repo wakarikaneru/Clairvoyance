@@ -36,8 +36,11 @@ public class HeavenMain {
 	private static final String STARTUP_MESSAGE = "Heaven Standby";// 起動時に表示されるメッセージ
 
 	private static final String PACKET_MODELDATA = "3D";// モデル情報送信パケットの識別子？[16進]
+	private static final String PACKET_MODELDATA_FLAGSTART = "15";// モデル情報送信パケットの識別子？フラグメントされた場合のスタート[16進]
+	private static final String PACKET_MODELDATA_FLAG = "2D";// モデル情報送信パケットの識別子？フラグメントされた場合の2番目以降[16進]
 	private static final String PACKET_LIVE = "80";// 生存情報送信パケットの識別子？[16進]
 	private static final String PACKET_BULLET = "15";// ARM弾の識別子？[16進]
+	private static final String PACKET_BULLET_FLAG = "25";// ARM弾の識別子？[16進]
 	private static final int BULLET_SIZE = 52; // ARM弾1発分のデータのサイズ[バイト]
 
 	private Properties prop = new Properties();
@@ -60,7 +63,6 @@ public class HeavenMain {
 
 	private byte[] b = null;
 	private ByteBuffer bb = null;
-	private long start, stop; // 処理速度測定用
 
 	public static void main(String[] args) {
 		HeavenMain main = new HeavenMain();
@@ -136,7 +138,7 @@ public class HeavenMain {
 		int snaplen = 64 * 1024; // Capture all packets, no trucation
 		// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
 		int flags = Pcap.MODE_NON_PROMISCUOUS;
-		int timeout = 30; // millis
+		int timeout = 15; // millis
 		Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags, timeout,
 				errbuf);
 
@@ -149,8 +151,6 @@ public class HeavenMain {
 
 		// キャプチャフィルタ設定
 		PcapBpfProgram program = new PcapBpfProgram();
-		// String expression = "ip and udp and host " + address + " and port "
-		// + port;
 		String expression = "ip and udp and dst host " + address
 				+ " and dst port " + port;
 		int optimize = 1; // 0 = false
@@ -189,20 +189,31 @@ public class HeavenMain {
 						b = udp.getPayload();
 
 						// モデルデータの通信か判別する
-						if (PACKET_MODELDATA.equals(bytesToHex(b[0]))) {
+						if (PACKET_MODELDATA.equals(bytesToHex(b[0]))
+								|| PACKET_MODELDATA_FLAGSTART
+										.equals(bytesToHex(b[0]))) {
 							// ARM弾の射撃情報か判別する
 							if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
 								// データの解析
-								decodeData(b);
+								decodeData(b, 6);
 								System.out.println(((b.length - 6) / 52)
 										+ " Bullet(s) Detected");
+							}
+						}
+						// フラグメントされた途中のパケットか判別する
+						if (PACKET_MODELDATA_FLAG.equals(bytesToHex(b[0]))) {
+							// ARM弾の射撃情報か判別する?(謎多し)
+							if (PACKET_BULLET_FLAG.equals(bytesToHex(b[4]))) {
+								// データの解析
+								decodeData(b, 2);
+								System.out.println(((b.length - 2) / 52)
+										+ " Bullet(s) Detected?");
 							}
 						}
 						// デバッグモード
 						if (debug) {
 							outputHex(b);
 						}
-
 					}
 				}
 			}
@@ -228,18 +239,18 @@ public class HeavenMain {
 	}
 
 	// 抽出したデータ部を解析して出力する
-	private void decodeData(byte[] b) {
+	private void decodeData(byte[] b, int headerBytes) {
 		bb = ByteBuffer.wrap(b);
 		bb.order(ByteOrder.LITTLE_ENDIAN);
 		// データを読み込む準備
 		try {
 			// ヘッダ部分を読み飛ばす
-			bb.getShort();
-			bb.get();
-			bb.get();
-			bb.getShort();
+			for (int i = 0; i < headerBytes; i++) {
+				bb.get();
+			}
+			// データを読み込む
 			StringBuilder str = new StringBuilder();
-			for (int i = 0; i < (b.length - 6) / BULLET_SIZE; i++) {
+			for (int i = 0; i < (b.length - headerBytes) / BULLET_SIZE; i++) {
 				str.append("{");
 				// データを抽出
 				str.append("x=" + bb.getFloat() + ",");
