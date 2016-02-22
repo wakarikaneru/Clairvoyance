@@ -36,11 +36,11 @@ public class HeavenMain {
 	private static final String STARTUP_MESSAGE = "Heaven Standby";// 起動時に表示されるメッセージ
 
 	private static final String PACKET_MODELDATA = "3D";// モデル情報送信パケットの識別子？[16進]
-	private static final String PACKET_MODELDATA_FLAGSTART = "15";// モデル情報送信パケットの識別子？フラグメントされた場合のスタート[16進]
-	private static final String PACKET_MODELDATA_FLAG = "2D";// モデル情報送信パケットの識別子？フラグメントされた場合の2番目以降[16進]
+	private static final String PACKET_MODELDATA_FRAGSTART = "15";// モデル情報送信パケットの識別子？フラグメントされた場合のスタート[16進]
+	private static final String PACKET_MODELDATA_FRAG = "2D";// モデル情報送信パケットの識別子？フラグメントされた場合の2番目以降[16進]
 	private static final String PACKET_LIVE = "80";// 生存情報送信パケットの識別子？[16進]
 	private static final String PACKET_BULLET = "15";// ARM弾の識別子？[16進]
-	private static final String PACKET_BULLET_FLAG = "25";// ARM弾の識別子？[16進]
+	private static final String PACKET_BULLET_FRAG = "25";// ARM弾の識別子？[16進]
 	private static final int BULLET_SIZE = 52; // ARM弾1発分のデータのサイズ[バイト]
 
 	private Properties prop = new Properties();
@@ -138,7 +138,7 @@ public class HeavenMain {
 		int snaplen = 64 * 1024; // Capture all packets, no trucation
 		// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
 		int flags = Pcap.MODE_NON_PROMISCUOUS;
-		int timeout = 15; // millis
+		int timeout = 10; // millis
 		Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags, timeout,
 				errbuf);
 
@@ -190,7 +190,7 @@ public class HeavenMain {
 
 						// モデルデータの通信か判別する
 						if (PACKET_MODELDATA.equals(bytesToHex(b[0]))
-								|| PACKET_MODELDATA_FLAGSTART
+								|| PACKET_MODELDATA_FRAGSTART
 										.equals(bytesToHex(b[0]))) {
 							// ARM弾の射撃情報か判別する
 							if (PACKET_BULLET.equals(bytesToHex(b[4]))) {
@@ -201,14 +201,11 @@ public class HeavenMain {
 							}
 						}
 						// フラグメントされた途中のパケットか判別する
-						if (PACKET_MODELDATA_FLAG.equals(bytesToHex(b[0]))) {
-							// ARM弾の射撃情報か判別する?(謎多し)
-							if (PACKET_BULLET_FLAG.equals(bytesToHex(b[4]))) {
-								// データの解析
-								decodeData(b, 2);
-								System.out.println(((b.length - 2) / 52)
-										+ " Bullet(s) Detected?");
-							}
+						if (PACKET_BULLET_FRAG.equals(bytesToHex(b[0]))) {
+							// データの解析
+							decodeData(b, 2);
+							System.out.println(((b.length - 2) / 52)
+									+ " Bullet(s) Detected?");
 						}
 						// デバッグモード
 						if (debug) {
