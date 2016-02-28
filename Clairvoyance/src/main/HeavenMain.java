@@ -138,7 +138,7 @@ public class HeavenMain {
 		int snaplen = 64 * 1024; // Capture all packets, no trucation
 		// int flags = Pcap.MODE_PROMISCUOUS; // capture all packets
 		int flags = Pcap.MODE_NON_PROMISCUOUS;
-		int timeout = 10; // millis
+		int timeout = 30; // millis
 		Pcap pcap = Pcap.openLive(device.getName(), snaplen, flags, timeout,
 				errbuf);
 
@@ -203,7 +203,14 @@ public class HeavenMain {
 						// フラグメントされた途中のパケットか判別する
 						if (PACKET_BULLET_FRAG.equals(bytesToHex(b[0]))) {
 							// データの解析
-							decodeData(b, 2);
+							//decodeData(b, 2);
+							System.out.println(((b.length - 2) / 52)
+									+ " Bullet(s) Detected?");
+						}
+						// フラグメントされた途中のパケットか判別する
+						if (PACKET_MODELDATA_FRAG.equals(bytesToHex(b[0]))) {
+							// データの解析
+							//decodeData(b, 2);
 							System.out.println(((b.length - 2) / 52)
 									+ " Bullet(s) Detected?");
 						}
